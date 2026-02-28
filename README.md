@@ -1,8 +1,7 @@
-<<<<<<< HEAD
-=======
+
 # Multi-Sensor Monitoring Platform in Industrial Hydrogen Production Scenarios
 **工业制氢场景下的多传感器监控平台**
->>>>>>> 384b8daa635a0a9903e1e216e030bde5b4e36dd6
+
 # 电解制备氢气监控系统
 
 > **Electrolysis H₂ Production Monitoring Dashboard**  
