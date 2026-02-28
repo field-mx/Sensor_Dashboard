@@ -413,7 +413,7 @@ class _ClickableGLView(gl.GLViewWidget):
 
     def __init__(self, point_size: float = 8.0, parent=None):
         super().__init__(parent)
-        self.HIT_RADIUS = point_size * 2
+        self.HIT_RADIUS = point_size * 1.5
         self._sensor_data: list[dict] = []
         self._positions:   np.ndarray | None = None
         # { sid: (_PinnedCard, point_index) }
