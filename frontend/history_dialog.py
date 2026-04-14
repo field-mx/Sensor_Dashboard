@@ -162,7 +162,10 @@ class HistoryDialog(QDialog):
                           color=TEXT_MUTED, size="11pt")
         self._pw.setLabel("bottom", "时间 / s（0−5分钟）", color=TEXT_MUTED, size="11pt")
 
+        tick_font = QFont("Consolas")
+        tick_font.setPointSize(10)
         for ax in ("left", "bottom"):
+            self._pw.getAxis(ax).setTickFont(tick_font)
             self._pw.getAxis(ax).setPen(pg.mkPen(BORDER_COLOR))
             self._pw.getAxis(ax).setTextPen(pg.mkPen(TEXT_MUTED))
 

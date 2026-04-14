@@ -60,14 +60,14 @@ class _HoverCard(QFrame):
 
         self._id_lbl = QLabel()
         _f_id = QFont("Segoe UI")
-        _f_id.setPixelSize(13)
+        _f_id.setPointSize(10)
         _f_id.setBold(True)
         self._id_lbl.setFont(_f_id)
         self._id_lbl.setStyleSheet(f"color: {ACCENT_BLUE};")
 
         self._val_lbl = QLabel()
         _f_val = QFont("Consolas")
-        _f_val.setPixelSize(18)
+        _f_val.setPointSize(14)
         _f_val.setBold(True)
         self._val_lbl.setFont(_f_val)
         self._val_lbl.setStyleSheet(f"color: {ACCENT_GREEN};")
@@ -89,6 +89,10 @@ class _HoverCard(QFrame):
         val  = info.get("value", 0.0)
         unit = info.get("unit", "")
         x, y, z = info.get("x", 0), info.get("y", 0), info.get("z", 0)
+
+        # 动态应用当前点云的映射颜色
+        point_color = info.get("color_hex", ACCENT_GREEN)
+        self._val_lbl.setStyleSheet(f"color: {point_color};")
 
         self._id_lbl.setText(f"传感器  {sid}")
         self._val_lbl.setText(
@@ -171,10 +175,10 @@ class _PinnedCard(QWidget):
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         W, H = self.CARD_W, self.CARD_H
 
-        # 背景（圆角，半透明深色）
+        # 背景（圆角，半透明）
         bg_path = QPainterPath()
         bg_path.addRoundedRect(QRectF(0, 0, W, H), 8, 8)
-        p.fillPath(bg_path, QColor(0x1c, 0x21, 0x28, 230))
+        p.fillPath(bg_path, QColor(0xff, 0xff, 0xff, 230))
 
         # 彩色边框
         p.setPen(QPen(self._color, 1.8))
@@ -222,7 +226,7 @@ class _PinnedCard(QWidget):
         ch = H - MT - MB
 
         chart_rect = QRectF(ML, MT, cw, ch)
-        p.fillRect(chart_rect, QColor(0x0d, 0x11, 0x17, 200))
+        p.fillRect(chart_rect, QColor(0xf0, 0xf2, 0xf5, 200))
 
         if len(self._buf) >= 2:
             vals = np.array(self._buf, dtype=float)
@@ -233,7 +237,7 @@ class _PinnedCard(QWidget):
             n = len(vals)
 
             # 横向参考线
-            p.setPen(QPen(QColor(0x30, 0x36, 0x3d, 160), 0.8))
+            p.setPen(QPen(QColor(0xd0, 0xd7, 0xde, 160), 0.8))
             for frac in (0.25, 0.5, 0.75):
                 gy = MT + ch * (1.0 - frac)
                 p.drawLine(QPointF(ML, gy), QPointF(ML + cw, gy))
@@ -307,11 +311,11 @@ class _ColorBar(QWidget):
     """右侧渐变色条图例，顶部=最大值（黄），底部=最小值（深紫）。"""
 
     _CTRL = [
-        (0.267, 0.005, 0.329),
-        (0.190, 0.408, 0.663),
-        (0.128, 0.566, 0.551),
-        (0.478, 0.757, 0.297),
-        (0.993, 0.906, 0.144),
+        (0.100, 0.100, 0.500),
+        (0.000, 0.400, 0.500),
+        (0.100, 0.500, 0.100),
+        (0.600, 0.300, 0.000),
+        (0.700, 0.000, 0.100),
     ]
 
     def __init__(self, unit: str = "", parent=None):
@@ -688,7 +692,7 @@ class FieldView3D(QWidget):
         body_lay.setSpacing(0)
 
         self._gl_view = _ClickableGLView(point_size=self._point_size)
-        self._gl_view.setBackgroundColor(BG_DEEP)
+        self._gl_view.setBackgroundColor(QColor(BG_DEEP))
         self._gl_view.setCameraPosition(distance=120, elevation=25, azimuth=45)
         self._gl_view.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
@@ -731,11 +735,12 @@ class FieldView3D(QWidget):
             self._gl_view.addItem(line)
 
         self._scatter = gl.GLScatterPlotItem(
-            pos=np.zeros((1, 3)),
+            pos=np.zeros((1, 3), dtype=np.float32),
             color=np.ones((1, 4), dtype=np.float32),
-            size=self._point_size,
+            size=np.array([self._point_size], dtype=np.float32),
             pxMode=True,
         )
+        self._scatter.setGLOptions('translucent')
         self._gl_view.addItem(self._scatter)
 
     def _load_demo_data(self):
@@ -759,9 +764,17 @@ class FieldView3D(QWidget):
         self._data = data
         positions = np.array([[d["x"], d["y"], d["z"]] for d in data], dtype=np.float32)
         values    = np.array([d["value"] for d in data], dtype=np.float32)
-        colors    = scalar_to_rgba(values)
-        self._scatter.setData(pos=positions, color=colors, size=self._point_size)
-        self._gl_view.set_sensor_data(data)
+        colors    = np.ascontiguousarray(scalar_to_rgba(values), dtype=np.float32)
+        sizes     = np.full((len(positions),), self._point_size, dtype=np.float32)
+        
+        self._scatter.setData(pos=positions, color=colors, size=sizes)
+        
+        # 将生成的颜色注入回 data 字典，供 HoverCard 取用以动态变色
+        for i, d in enumerate(self._data):
+            r, g, b, _ = colors[i]
+            d["color_hex"] = f"#{int(r*255):02x}{int(g*255):02x}{int(b*255):02x}"
+            
+        self._gl_view.set_sensor_data(self._data)
         self._stat_bar.update_stats(values)
         self._colorbar.update_range(float(values.min()), float(values.max()))
 

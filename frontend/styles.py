@@ -5,35 +5,35 @@ styles.py
 import numpy as np
 
 # ── 颜色常量 ────────────────────────────────────────────────────────────────
-BG_DEEP      = "#0d1117"   # 最深背景
-BG_SIDEBAR   = "#161b22"   # 侧边栏背景
-BG_CARD      = "#1c2128"   # 卡片/面板背景
-BORDER_COLOR = "#30363d"   # 边框/网格线
-ACCENT_BLUE  = "#58a6ff"   # 主强调色（蓝）
-ACCENT_GREEN = "#3fb950"   # 次强调色（绿）
-ACCENT_AMBER = "#d29922"   # 警告色（琥珀）
-ACCENT_RED   = "#f85149"   # 报警色
-TEXT_PRIMARY = "#e6edf3"   # 主文字
-TEXT_MUTED   = "#8b949e"   # 次要文字
+BG_DEEP      = "#f0f2f5"   # 最深背景(浅灰)
+BG_SIDEBAR   = "#ffffff"   # 侧边栏背景
+BG_CARD      = "#ffffff"   # 卡片/面板背景
+BORDER_COLOR = "#d0d7de"   # 边框/网格线
+ACCENT_BLUE  = "#0969da"   # 主强调色（蓝）
+ACCENT_GREEN = "#1a7f37"   # 次强调色（绿）
+ACCENT_AMBER = "#bf8700"   # 警告色（琥珀）
+ACCENT_RED   = "#cf222e"   # 报警色
+TEXT_PRIMARY = "#24292f"   # 主文字
+TEXT_MUTED   = "#57606a"   # 次要文字
 
-# 16 个通道配色（槽电压波形，可扩展）
+# 16 个通道配色（槽电压波形，适应浅色背景的深色系列可扩展）
 CHANNEL_COLORS = [
-    "#58a6ff",  # CH01 蓝
-    "#3fb950",  # CH02 绿
-    "#d29922",  # CH03 琥珀
-    "#f85149",  # CH04 红
-    "#bc8cff",  # CH05 紫
-    "#39d353",  # CH06 亮绿
-    "#ff7b72",  # CH07 橙红
-    "#79c0ff",  # CH08 浅蓝
-    "#ffa657",  # CH09 橙
-    "#56d364",  # CH10 芽绿
-    "#e3b341",  # CH11 金黄
-    "#f0883e",  # CH12 深橙
-    "#a5d6ff",  # CH13 天蓝
-    "#d2a8ff",  # CH14 淡紫
-    "#7ee787",  # CH15 薄荷绿
-    "#ff9a8b",  # CH16 珊瑚红
+    "#003060",  # CH01 深海蓝
+    "#006000",  # CH02 深绿
+    "#804000",  # CH03 深棕
+    "#800000",  # CH04 暗红
+    "#400080",  # CH05 深紫
+    "#006400",  # CH06 墨绿
+    "#8b0000",  # CH07 血红
+    "#00008b",  # CH08 幽蓝
+    "#d2691e",  # CH09 巧克力橙
+    "#2e8b57",  # CH10 海洋绿
+    "#8b6508",  # CH11 暗金
+    "#cd5c5c",  # CH12 栗红
+    "#4682b4",  # CH13 钢青
+    "#6a5acd",  # CH14 灰紫
+    "#008080",  # CH15 深青
+    "#8b4513",  # CH16 鞍褐
 ]
 
 # ── 全局 QSS ────────────────────────────────────────────────────────────────
@@ -44,6 +44,7 @@ QMainWindow, QDialog, QWidget {{
     color: {TEXT_PRIMARY};
     font-family: "Segoe UI", "Microsoft YaHei UI", sans-serif;
     font-size: 13px;
+    font-weight: bold;
 }}
 
 /* ---- 侧边栏 ---- */
@@ -73,12 +74,12 @@ QMainWindow, QDialog, QWidget {{
     font-weight: 500;
 }}
 #menu_btn:hover {{
-    background-color: rgba(88, 166, 255, 0.08);
+    background-color: rgba(9, 105, 218, 0.08);
     color: {TEXT_PRIMARY};
-    border-left: 3px solid rgba(88, 166, 255, 0.4);
+    border-left: 3px solid rgba(9, 105, 218, 0.4);
 }}
 #menu_btn[active="true"] {{
-    background-color: rgba(88, 166, 255, 0.15);
+    background-color: rgba(9, 105, 218, 0.15);
     color: {ACCENT_BLUE};
     border-left: 3px solid {ACCENT_BLUE};
     font-weight: 700;
@@ -162,14 +163,14 @@ QFrame[frameShape="4"], QFrame[frameShape="5"] {{
 
 /* ---- 关闭按钮等 ---- */
 QPushButton#close_btn {{
-    background-color: rgba(248, 81, 73, 0.12);
+    background-color: rgba(207, 34, 46, 0.12);
     color: {ACCENT_RED};
-    border: 1px solid rgba(248, 81, 73, 0.3);
+    border: 1px solid rgba(207, 34, 46, 0.3);
     border-radius: 4px;
     padding: 6px 16px;
 }}
 QPushButton#close_btn:hover {{
-    background-color: rgba(248, 81, 73, 0.25);
+    background-color: rgba(207, 34, 46, 0.25);
 }}
 """
 
@@ -190,11 +191,11 @@ def scalar_to_rgba(values: np.ndarray, alpha: float = 0.9) -> np.ndarray:
     # 自定义 viridis-like colormap: 蓝→青→绿→黄→红
     # 控制点 RGB（0~1）
     ctrl = np.array([
-        [0.267, 0.005, 0.329],   # 深紫蓝  t=0
-        [0.190, 0.408, 0.663],   # 深蓝    t=0.25
-        [0.128, 0.566, 0.551],   # 青绿    t=0.5
-        [0.478, 0.757, 0.297],   # 浅绿黄  t=0.75
-        [0.993, 0.906, 0.144],   # 黄      t=1.0
+        [0.100, 0.100, 0.500],   # 深蓝  t=0
+        [0.000, 0.400, 0.500],   # 深青  t=0.25
+        [0.100, 0.500, 0.100],   # 深绿  t=0.5
+        [0.600, 0.300, 0.000],   # 棕橙  t=0.75
+        [0.700, 0.000, 0.100],   # 深红  t=1.0
     ], dtype=np.float32)
     ctrl_t = np.linspace(0, 1, len(ctrl))
 

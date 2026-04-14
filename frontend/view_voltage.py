@@ -149,7 +149,7 @@ class _ChannelCard(QFrame):
             f"  font-size: 10px;"
             f"}}"
             f"QPushButton#expand_btn:hover {{"
-            f"  background: rgba(88,166,255,0.10);"
+            f"  background: rgba(9,105,218,0.10);"
             f"  color: {ACCENT_BLUE};"
             f"}}"
         )
@@ -169,6 +169,10 @@ class _ChannelCard(QFrame):
         self._pw.setLabel("left",   "V", color=TEXT_MUTED, size="9pt")
         self._pw.setLabel("bottom", "s", color=TEXT_MUTED, size="9pt")
         self._pw.setYRange(VOLTAGE_MIN, VOLTAGE_MAX, padding=0.03)
+        tick_font = QFont("Consolas")
+        tick_font.setPointSize(9)
+        self._pw.getAxis("left").setTickFont(tick_font)
+        self._pw.getAxis("bottom").setTickFont(tick_font)
         self._pw.getAxis("left").setTextPen(pg.mkPen(TEXT_MUTED))
         self._pw.getAxis("bottom").setTextPen(pg.mkPen(TEXT_MUTED))
         self._pw.getAxis("left").setPen(pg.mkPen(BORDER_COLOR))
@@ -283,9 +287,9 @@ class VoltageView(QWidget):
         self._expand_all_btn.setFixedWidth(90)
         self._expand_all_btn.setObjectName("close_btn")
         self._expand_all_btn.setStyleSheet(
-            f"QPushButton{{background:rgba(88,166,255,0.12);color:{ACCENT_BLUE};"
-            f"border:1px solid rgba(88,166,255,0.3);border-radius:4px;padding:4px 10px;}}"
-            f"QPushButton:hover{{background:rgba(88,166,255,0.25);}}"
+            f"QPushButton{{background:rgba(9,105,218,0.12);color:{ACCENT_BLUE};"
+            f"border:1px solid rgba(9,105,218,0.2); border-radius:4px; padding:4px 0;}}"
+            f"QPushButton:hover{{background:rgba(9,105,218,0.25);}}"
         )
         self._expand_all_btn.clicked.connect(self._toggle_all)
         self._all_expanded = False
