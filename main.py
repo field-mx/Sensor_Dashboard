@@ -5,6 +5,7 @@ main.py
 - 初始化 QApplication 并应用深色工业风样式
 - 实例化 MainWindow
 - 启动 QTimer 每 1000ms 向 VoltageView 推送 16 通道电压仿真数据（0–30V）
+- helloworld
 """
 import sys
 import math
