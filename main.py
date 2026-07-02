@@ -7,6 +7,7 @@
 接入 Linux 采集板：
   python main.py --source udp --host 0.0.0.0 --port 9000
   python main.py --source tcp --host 0.0.0.0 --port 9000
+  helloworld git save 2026.7.2
 """
 from __future__ import annotations
 
