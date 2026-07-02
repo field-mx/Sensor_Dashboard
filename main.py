@@ -1,60 +1,69 @@
 """
-本行用于测试，假设新分支改好了，推送回主分支
-main.py
-应用入口
-- 初始化 QApplication 并应用深色工业风样式
-- 实例化 MainWindow
-- 启动 QTimer 每 1000ms 向 VoltageView 推送 16 通道电压仿真数据（0–30V）
-- helloworld
-"""
-import sys
-import math
-import numpy as np
-from PyQt6.QtWidgets import QApplication
-from PyQt6.QtCore import QTimer
+应用入口。
 
+默认启动内置模拟数据源：
+  python main.py
+
+接入 Linux 采集板：
+  python main.py --source udp --host 0.0.0.0 --port 9000
+  python main.py --source tcp --host 0.0.0.0 --port 9000
+"""
+from __future__ import annotations
+
+import argparse
+import sys
+
+from PyQt6.QtWidgets import QApplication
+
+from backend.data_manager import DataManager
+from backend.network_receiver import NetworkSensorSource
 from frontend.main_window import MainWindow
 from frontend.styles import DARK_STYLE
 
 
-# ── 1. 初始化应用 ────────────────────────────────────────────────────────────
-app = QApplication(sys.argv)
-app.setApplicationName("电解制备氢气监控系统")
-app.setOrganizationName("Shanghai Electric")
-app.setStyleSheet(DARK_STYLE)
-
-# ── 2. 创建主窗口 ────────────────────────────────────────────────────────────
-window = MainWindow()
-window.show()
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="电解槽多传感器监控系统")
+    parser.add_argument("--source", choices=["mock", "udp", "tcp"], default="mock", help="数据源类型")
+    parser.add_argument("--host", default="0.0.0.0", help="UDP/TCP 监听地址")
+    parser.add_argument("--port", type=int, default=9000, help="UDP/TCP 监听端口")
+    return parser.parse_args()
 
 
-# ── 3. 假数据推送（模拟后端实时推送，16 通道，0–30V，每秒一帧）────────────
-rng = np.random.default_rng(2024)
-NUM_CHANNELS = 16
-_phase = [0.0]   # 可变容器用于在闭包中更新
+def main() -> int:
+    args = _parse_args()
+
+    app = QApplication(sys.argv)
+    app.setApplicationName("电解槽多传感器监控系统")
+    app.setOrganizationName("Shanghai Electric")
+    app.setStyleSheet(DARK_STYLE)
+
+    window = MainWindow()
+    data_manager = DataManager()
+
+    data_manager.field_data_updated.connect(window.update_field_frame)
+    data_manager.voltage_data_updated.connect(window.update_voltage_frame)
+    data_manager.process_data_updated.connect(window.update_process)
+    data_manager.twin_data_updated.connect(window.update_twin)
+    data_manager.source_status_changed.connect(window.update_source_status)
+
+    network_source: NetworkSensorSource | None = None
+    if args.source == "mock":
+        data_manager.start_mock_source()
+    else:
+        network_source = NetworkSensorSource(protocol=args.source, host=args.host, port=args.port)
+        network_source.error_ready.connect(lambda msg: window.statusBar().showMessage(msg, 5000))
+        data_manager.set_hardware_source(network_source)
+        network_source.start()
+
+    def _shutdown():
+        if network_source is not None:
+            network_source.stop()
+        data_manager.stop()
+
+    app.aboutToQuit.connect(_shutdown)
+    window.show()
+    return app.exec()
 
 
-def _push_voltage():
-    """每 1000 ms 向槽电压页面推送一帧新数据（16 通道，0–30V）。"""
-    ph = _phase[0]
-    data = {}
-    for i in range(NUM_CHANNELS):
-        phase_offset = i * (2 * math.pi / NUM_CHANNELS)
-        # 每通道中心值在 5–25V 分布
-        center = 5.0 + i * (20.0 / max(NUM_CHANNELS - 1, 1))
-        v = center + 2.0 * math.sin(ph + phase_offset)
-        v += float(rng.normal(0, 0.05))
-        v = max(0.0, min(30.0, v))
-        data[f"CH{i+1:02d}"] = round(v, 3)
-
-    window.update_voltage(data)
-    _phase[0] = (ph + 2 * math.pi / 5.0) % (2 * math.pi)  # 5 秒一个周期
-
-
-timer = QTimer()
-timer.timeout.connect(_push_voltage)
-timer.start(1000)   # 1000 ms 刷新间隔
-
-
-# ── 4. 运行事件循环 ──────────────────────────────────────────────────────────
-sys.exit(app.exec())
+if __name__ == "__main__":
+    sys.exit(main())
