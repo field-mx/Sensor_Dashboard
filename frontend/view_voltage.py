@@ -277,6 +277,14 @@ class _ChannelCard(QFrame):
         if not self._t_buf or now != self._t_buf[-1]:
             self._t_buf.append(now)
 
+        if (
+            voltage is None
+            and temperature is not None
+            and self._last_voltage is None
+            and self._mode != "temperature"
+        ):
+            self._set_mode("temperature")
+
         if voltage is not None:
             v = max(VOLTAGE_MIN, min(VOLTAGE_MAX, float(voltage)))
             self._last_voltage = v

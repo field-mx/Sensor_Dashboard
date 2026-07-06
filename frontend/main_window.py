@@ -49,7 +49,7 @@ class MainWindow(QMainWindow):
         self._pages: list[QWidget] = []
         self._build_ui()
         self._build_status_bar()
-        self._switch_page(0)
+        self._switch_page(1)
 
     def _build_ui(self):
         central = QWidget()

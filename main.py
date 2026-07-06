@@ -1,12 +1,12 @@
 """
 应用入口。
 
-默认启动内置模拟数据源：
+默认启动 UDP 温度监听：
   python main.py
 
 接入 Linux 采集板：
-  python main.py --source udp --host 0.0.0.0 --port 9000
-  python main.py --source tcp --host 0.0.0.0 --port 9000
+  python main.py --source udp --host 0.0.0.0 --port 9091
+  python main.py --source tcp --host 0.0.0.0 --port 9091
   helloworld git save 2026.7.2
 """
 from __future__ import annotations
@@ -24,9 +24,9 @@ from frontend.styles import DARK_STYLE
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="电解槽多传感器监控系统")
-    parser.add_argument("--source", choices=["mock", "udp", "tcp"], default="mock", help="数据源类型")
+    parser.add_argument("--source", choices=["mock", "udp", "tcp"], default="udp", help="数据源类型")
     parser.add_argument("--host", default="0.0.0.0", help="UDP/TCP 监听地址")
-    parser.add_argument("--port", type=int, default=9000, help="UDP/TCP 监听端口")
+    parser.add_argument("--port", type=int, default=9091, help="UDP/TCP 监听端口")
     return parser.parse_args()
 
 

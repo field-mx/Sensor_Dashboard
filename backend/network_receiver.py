@@ -18,10 +18,15 @@ TCP/UDP 网络数据源。
 from __future__ import annotations
 
 import json
+import re
 import socket
+from datetime import datetime
 from typing import Any
 
 from PyQt6.QtCore import QThread, pyqtSignal
+
+_TEMP_VALUE_PATTERN = r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)"
+_TEMP_VALUE_RE = re.compile(_TEMP_VALUE_PATTERN)
 
 
 class NetworkSensorSource(QThread):
@@ -33,7 +38,13 @@ class NetworkSensorSource(QThread):
     twin_data_ready = pyqtSignal(dict)
     error_ready = pyqtSignal(str)
 
-    def __init__(self, protocol: str = "udp", host: str = "0.0.0.0", port: int = 9000, parent=None):
+    def __init__(
+        self,
+        protocol: str = "udp",
+        host: str = "0.0.0.0",
+        port: int = 9000,
+        parent=None,
+    ):
         super().__init__(parent)
         self.protocol = protocol.lower()
         if self.protocol == "tcp":
@@ -134,12 +145,62 @@ class NetworkSensorSource(QThread):
 
     def _handle_bytes(self, packet: bytes) -> None:
         try:
-            text = packet.decode("utf-8").strip()
+            text = packet.decode("ascii").strip()
+        except UnicodeDecodeError:
+            try:
+                text = packet.decode("utf-8").strip()
+            except UnicodeDecodeError as exc:
+                self.error_ready.emit(f"网络帧解码失败：{exc}")
+                return
+        if not text:
+            return
+
+        try:
             data = json.loads(text)
-        except Exception as exc:
+        except json.JSONDecodeError as exc:
+            if self._dispatch_ascii_temperature(text):
+                return
             self.error_ready.emit(f"网络帧解析失败：{exc}")
             return
         self._dispatch(data)
+
+    def _dispatch_ascii_temperature(self, text: str) -> bool:
+        channel_temperatures = self._parse_pt100_temperatures(text)
+        if not channel_temperatures:
+            return False
+
+        self.voltage_data_ready.emit(
+            {
+                "timestamp": datetime.now(),
+                "channels": {},
+                "channel_temperatures": channel_temperatures,
+            }
+        )
+        return True
+
+    @staticmethod
+    def _parse_pt100_temperatures(text: str) -> dict[str, float]:
+        parts = [part.strip() for part in text.replace("；", ";").split(",")]
+        temp_index = None
+        for index, part in enumerate(parts):
+            if part.upper() == "TEMP":
+                temp_index = index + 1
+                break
+        if temp_index is None:
+            return {}
+
+        values: list[float] = []
+        for part in parts[temp_index:]:
+            match = _TEMP_VALUE_RE.search(part)
+            if match is None:
+                continue
+            values.append(round(float(match.group(0)), 1))
+            if len(values) == 16:
+                break
+
+        if len(values) != 16:
+            return {}
+        return {f"CH{index:02d}": value for index, value in enumerate(values, start=1)}
 
     def _dispatch(self, data: Any) -> None:
         if isinstance(data, list):
