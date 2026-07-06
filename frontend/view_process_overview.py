@@ -35,7 +35,7 @@ from .styles import (
     TEXT_PRIMARY,
 )
 
-HISTORY_POINTS = 120
+HISTORY_POINTS = 2000
 
 PROCESS_METRICS = [
     {
@@ -143,6 +143,7 @@ class _MetricCard(QFrame):
         self._buf: deque[float] = deque(maxlen=HISTORY_POINTS)
         self._index_buf: deque[int] = deque(maxlen=HISTORY_POINTS)
         self._tick = 0
+        self._current_normal = metric["normal"]
 
         self.setObjectName("metric_card")
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
@@ -218,21 +219,40 @@ class _MetricCard(QFrame):
             "font-size: 11px; font-weight: 700; padding: 3px 0;"
         )
 
-    def update_value(self, value: float, status: str | None = None):
-        value = float(value)
+    def update_value(
+        self,
+        value: float,
+        status: str | None = None,
+        unit: str | None = None,
+        normal: tuple[float, float] | None = None,
+        decimals: int | None = None,
+        values: list[float] | tuple[float, ...] | None = None,
+    ):
+        series = [float(item) for item in values] if values else [float(value)]
+        if not series:
+            return
+        value = float(series[-1])
         metric = self._metric
-        level = status or _level_for(value, metric["normal"])
+        display_unit = unit or metric["unit"]
+        display_normal = normal or metric["normal"]
+        display_decimals = int(decimals if decimals is not None else metric["decimals"])
+        self._current_normal = display_normal
+        level = status or _level_for(value, display_normal)
         color = _level_color(level)
         status_text = {"normal": "正常", "warning": "预警", "alarm": "报警"}.get(level, "正常")
 
         self._status_lbl.setText(status_text)
         self._status_lbl.setStyleSheet(self._pill_style(color))
-        self._value_lbl.setText(f"{value:.{metric['decimals']}f}")
+        self._value_lbl.setText(f"{value:.{display_decimals}f}")
         self._value_lbl.setStyleSheet(f"color: {color};")
+        self._unit_lbl.setText(display_unit)
+        lo, hi = display_normal
+        self._range_lbl.setText(f"正常区间 {lo:g}-{hi:g} {display_unit}")
 
-        self._tick += 1
-        self._buf.append(value)
-        self._index_buf.append(self._tick)
+        for sample in series:
+            self._tick += 1
+            self._buf.append(sample)
+            self._index_buf.append(self._tick)
         self._refresh_curve()
 
     def _refresh_curve(self):
@@ -241,12 +261,15 @@ class _MetricCard(QFrame):
         xs = np.array(self._index_buf, dtype=float)
         ys = np.array(self._buf, dtype=float)
         self._curve.setData(xs - xs[-1], ys)
-        lo, hi = self._metric["normal"]
-        ymin = min(float(ys.min()), lo)
-        ymax = max(float(ys.max()), hi)
-        if ymax == ymin:
-            ymax += 1.0
-        pad = (ymax - ymin) * 0.12
+        lo, hi = self._current_normal
+        ymin = float(ys.min())
+        ymax = float(ys.max())
+        min_span = max((hi - lo) * 0.03, 0.10)
+        if ymax - ymin < min_span:
+            center = (ymax + ymin) / 2.0
+            ymin = center - min_span / 2.0
+            ymax = center + min_span / 2.0
+        pad = (ymax - ymin) * 0.18
         self._spark.setYRange(ymin - pad, ymax + pad, padding=0)
 
 
@@ -312,12 +335,27 @@ class ProcessOverviewView(QWidget):
             if isinstance(payload, dict):
                 value = payload.get("value")
                 status = payload.get("status") or payload.get("level")
+                unit = payload.get("unit")
+                normal = payload.get("normal")
+                decimals = payload.get("decimals")
+                values = payload.get("values")
             else:
                 value = payload
                 status = None
+                unit = None
+                normal = None
+                decimals = None
+                values = None
             if value is None:
                 continue
-            self._cards[key].update_value(float(value), status=status)
+            self._cards[key].update_value(
+                float(value),
+                status=status,
+                unit=unit,
+                normal=normal,
+                decimals=decimals,
+                values=values,
+            )
 
         self._clock_lbl.setText(f"最近更新 {_normalize_ts(data.get('timestamp'))}")
 

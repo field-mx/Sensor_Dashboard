@@ -1,5 +1,6 @@
 
 # Multi-Sensor Monitoring Platform in Industrial Hydrogen Production Scenarios
+传感器：氢气一个、氧气一个、压力两个、温度两个
 **工业制氢场景下的多传感器监控平台**
 
 # 电解制备氢气监控系统

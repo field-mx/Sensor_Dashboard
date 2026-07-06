@@ -20,13 +20,59 @@ from __future__ import annotations
 import json
 import re
 import socket
+import struct
+import time
 from datetime import datetime
 from typing import Any
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
+AD7616_CHANNELS = 16
+AD7616_PROCESS_CHANNEL_COUNT = 6
+AD7616_BYTES_PER_SAMPLE = 2
+AD7616_FRAME_BYTES = AD7616_CHANNELS * AD7616_BYTES_PER_SAMPLE
+AD7616_EMIT_INTERVAL_SEC = 0.05
+AD7616_MAX_PENDING_SAMPLES = 2048
+AD7616_MAX_EMIT_SAMPLES = 512
+AD7616_SOCKET_RCVBUF = 4 * 1024 * 1024
+AD7616_PROCESS_CHANNELS = [
+    (0, "pressure_1", "P-01"),
+    (1, "pressure_2", "P-02"),
+    (2, "temperature_1", "T-01"),
+    (3, "temperature_2", "T-02"),
+    (4, "oxygen", "O2-01"),
+    (5, "hydrogen", "H2-01"),
+]
 _TEMP_VALUE_PATTERN = r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)"
 _TEMP_VALUE_RE = re.compile(_TEMP_VALUE_PATTERN)
+
+
+def raw_count_to_current_ma(channel_index: int, raw_count: float) -> float:
+    """Current placeholder conversion: AD7616 count -> simulated 4-20 mA."""
+    del channel_index
+    normalized = (float(raw_count) + 32768.0) / 65535.0
+    normalized = max(0.0, min(1.0, normalized))
+    return 4.0 + normalized * 16.0
+
+
+def convert_process_channel_value(channel_index: int, raw_count: float) -> dict[str, Any]:
+    """
+    Convert AD7616 raw counts to the process-overview value.
+
+    Current implementation exposes a simulated 4-20 mA signal. Replace this
+    function later with calibrated physical-unit conversion per sensor/channel.
+    """
+    current_ma = raw_count_to_current_ma(channel_index, raw_count)
+    status = "alarm" if current_ma < 4.0 or current_ma > 20.0 else "normal"
+    return {
+        "value": round(current_ma, 2),
+        "unit": "mA",
+        "decimals": 2,
+        "normal": (4.0, 20.0),
+        "status": status,
+        "raw_count": round(float(raw_count), 2),
+        "channel": channel_index,
+    }
 
 
 class NetworkSensorSource(QThread):
@@ -54,6 +100,10 @@ class NetworkSensorSource(QThread):
         self._running = False
         self._sock: socket.socket | None = None
         self._client: socket.socket | None = None
+        self._ad7616_pending_raw: list[list[int]] = [
+            [] for _ in range(AD7616_PROCESS_CHANNEL_COUNT)
+        ]
+        self._ad7616_last_emit = 0.0
 
     def run(self) -> None:
         self._running = True
@@ -84,12 +134,14 @@ class NetworkSensorSource(QThread):
             with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
                 self._sock = sock
                 sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, AD7616_SOCKET_RCVBUF)
                 sock.bind((self.host, self.port))
-                sock.settimeout(0.5)
+                sock.settimeout(0.05)
                 while self._running:
                     try:
                         packet, _addr = sock.recvfrom(65535)
                     except socket.timeout:
+                        self._flush_ad7616_pending(force=True)
                         continue
                     except OSError:
                         break
@@ -97,6 +149,7 @@ class NetworkSensorSource(QThread):
         except OSError as exc:
             self.error_ready.emit(f"UDP 监听失败：{exc}")
         finally:
+            self._flush_ad7616_pending(force=True)
             self._sock = None
 
     def _run_tcp_server(self) -> None:
@@ -144,17 +197,39 @@ class NetworkSensorSource(QThread):
             self._handle_bytes(buffer)
 
     def _handle_bytes(self, packet: bytes) -> None:
+        if self._looks_like_text_packet(packet):
+            self._handle_text_packet(packet)
+            return
+
+        if self._dispatch_ad7616_process(packet):
+            return
+
+        self._handle_text_packet(packet)
+
+    @staticmethod
+    def _looks_like_text_packet(packet: bytes) -> bool:
+        stripped = packet.lstrip()
+        return stripped.startswith((b"{", b"[", b"PT100", b"pt100", b"TEMP", b"temp"))
+
+    def _handle_text_packet(self, packet: bytes) -> None:
+        text: str | None = None
         try:
             text = packet.decode("ascii").strip()
         except UnicodeDecodeError:
             try:
                 text = packet.decode("utf-8").strip()
             except UnicodeDecodeError as exc:
-                self.error_ready.emit(f"网络帧解码失败：{exc}")
-                return
+                text = None
+
+        if text is None:
+            self.error_ready.emit("网络帧解码失败：无法按 ASCII/UTF-8 解码，也不是 AD7616 数据包")
+            return
         if not text:
             return
 
+        self._handle_text_frame(text)
+
+    def _handle_text_frame(self, text: str) -> None:
         try:
             data = json.loads(text)
         except json.JSONDecodeError as exc:
@@ -177,6 +252,88 @@ class NetworkSensorSource(QThread):
             }
         )
         return True
+
+    def _dispatch_ad7616_process(self, packet: bytes) -> bool:
+        raw_by_channel = self._parse_ad7616_raw_channels(packet)
+        if not raw_by_channel:
+            return False
+
+        for channel_index, raw_values in enumerate(raw_by_channel):
+            pending = self._ad7616_pending_raw[channel_index]
+            pending.extend(raw_values)
+            if len(pending) > AD7616_MAX_PENDING_SAMPLES:
+                del pending[:-AD7616_MAX_PENDING_SAMPLES]
+
+        self._flush_ad7616_pending(force=False)
+        return True
+
+    def _flush_ad7616_pending(self, force: bool = False) -> bool:
+        if not any(self._ad7616_pending_raw):
+            return False
+
+        now = time.perf_counter()
+        if not force and now - self._ad7616_last_emit < AD7616_EMIT_INTERVAL_SEC:
+            return False
+
+        raw_snapshot = [
+            raw_values[-AD7616_MAX_EMIT_SAMPLES:]
+            for raw_values in self._ad7616_pending_raw
+        ]
+        sensors = self._build_ad7616_process_sensors(raw_snapshot)
+        self._ad7616_pending_raw = [[] for _ in range(AD7616_PROCESS_CHANNEL_COUNT)]
+        self._ad7616_last_emit = now
+
+        if not sensors:
+            return False
+
+        self.process_data_ready.emit({"timestamp": datetime.now(), "sensors": sensors})
+        return True
+
+    @staticmethod
+    def _parse_ad7616_process(packet: bytes) -> dict[str, dict[str, Any]]:
+        raw_by_channel = NetworkSensorSource._parse_ad7616_raw_channels(packet)
+        return NetworkSensorSource._build_ad7616_process_sensors(raw_by_channel)
+
+    @staticmethod
+    def _parse_ad7616_raw_channels(packet: bytes) -> list[list[int]]:
+        if len(packet) < AD7616_FRAME_BYTES or len(packet) % AD7616_FRAME_BYTES != 0:
+            return []
+
+        frame_count = len(packet) // AD7616_FRAME_BYTES
+        raw_by_channel: list[list[int]] = [[] for _ in range(AD7616_PROCESS_CHANNEL_COUNT)]
+        try:
+            for frame_index in range(frame_count):
+                offset = frame_index * AD7616_FRAME_BYTES
+                frame_first_six = struct.unpack_from("<6h", packet, offset)
+                for channel_index, raw_value in enumerate(frame_first_six):
+                    raw_by_channel[channel_index].append(raw_value)
+        except struct.error:
+            return []
+
+        return raw_by_channel
+
+    @staticmethod
+    def _build_ad7616_process_sensors(
+        raw_by_channel: list[list[int]],
+    ) -> dict[str, dict[str, Any]]:
+        sensors: dict[str, dict[str, Any]] = {}
+        for channel_index, key, sensor_id in AD7616_PROCESS_CHANNELS:
+            if channel_index >= len(raw_by_channel):
+                continue
+            raw_values = raw_by_channel[channel_index]
+            if not raw_values:
+                continue
+            values = [
+                round(raw_count_to_current_ma(channel_index, raw_value), 4)
+                for raw_value in raw_values
+            ]
+            payload = convert_process_channel_value(channel_index, raw_values[-1])
+            payload["sensor_id"] = sensor_id
+            payload["values"] = values
+            payload["raw_values"] = raw_values
+            payload["sample_count"] = len(raw_values)
+            sensors[key] = payload
+        return sensors
 
     @staticmethod
     def _parse_pt100_temperatures(text: str) -> dict[str, float]:

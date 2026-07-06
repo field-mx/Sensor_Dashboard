@@ -159,7 +159,8 @@ class MainWindow(QMainWindow):
 
     def update_process(self, data: dict):
         self._overview_page.update_process(data)
-        self._twin_page.update_from_process(data)
+        if self._stack.currentWidget() is self._twin_page:
+            self._twin_page.update_from_process(data)
 
     def update_twin(self, data: dict):
         if "sensors" in data:
