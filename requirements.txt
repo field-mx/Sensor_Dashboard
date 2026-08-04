@@ -2,3 +2,4 @@ numpy>=1.24
 PyQt6>=6.4
 pyqtgraph>=0.13
 PyOpenGL>=3.1        # pyqtgraph.opengl 3D 视图所需
+openpyxl>=3.1

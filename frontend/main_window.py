@@ -9,13 +9,18 @@ main_window.py
 """
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt
+from datetime import datetime
+from pathlib import Path
+
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
+    QFileDialog,
     QFrame,
     QHBoxLayout,
     QLabel,
     QMainWindow,
+    QMessageBox,
     QPushButton,
     QSizePolicy,
     QStackedWidget,
@@ -39,6 +44,9 @@ _MENU_ITEMS = [
 class MainWindow(QMainWindow):
     """电解槽多传感器监控系统主窗口。"""
 
+    recording_start_requested = pyqtSignal(str)
+    recording_stop_requested = pyqtSignal()
+
     def __init__(self):
         super().__init__()
         self.setWindowTitle("电解槽多传感器监控系统 | Shanghai Electric")
@@ -47,6 +55,7 @@ class MainWindow(QMainWindow):
 
         self._buttons: list[QPushButton] = []
         self._pages: list[QWidget] = []
+        self._save_path = ""
         self._build_ui()
         self._build_status_bar()
         self._switch_page(1)
@@ -106,6 +115,7 @@ class MainWindow(QMainWindow):
             self._buttons.append(btn)
 
         sidebar_lay.addStretch()
+        self._build_save_panel(sidebar_lay)
 
         ver_lbl = QLabel("v1.1.0  Network Ready")
         ver_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -124,6 +134,62 @@ class MainWindow(QMainWindow):
         for page in self._pages:
             self._stack.addWidget(page)
         main_lay.addWidget(self._stack, stretch=1)
+
+    def _build_save_panel(self, parent_layout: QVBoxLayout):
+        panel = QFrame()
+        panel.setStyleSheet(
+            f"background-color: {BG_SIDEBAR}; border-top: 1px solid {BORDER_COLOR};"
+        )
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setSpacing(6)
+
+        title = QLabel("数据保存")
+        title.setStyleSheet(f"color: {TEXT_PRIMARY}; font-size: 12px; font-weight: 700;")
+        layout.addWidget(title)
+
+        self._save_path_label = QLabel("尚未选择 Excel 文件")
+        self._save_path_label.setWordWrap(True)
+        self._save_path_label.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 10px;")
+        layout.addWidget(self._save_path_label)
+
+        choose_button = QPushButton("选择保存位置")
+        choose_button.clicked.connect(self._choose_save_path)
+        choose_button.setStyleSheet(self._save_button_style("#0969da"))
+        self._choose_save_button = choose_button
+        layout.addWidget(choose_button)
+
+        button_row = QHBoxLayout()
+        button_row.setSpacing(6)
+        self._start_save_button = QPushButton("开始保存")
+        self._start_save_button.setEnabled(False)
+        self._start_save_button.clicked.connect(self._request_start_recording)
+        self._start_save_button.setStyleSheet(self._save_button_style("#1a7f37"))
+        button_row.addWidget(self._start_save_button)
+
+        self._stop_save_button = QPushButton("停止保存")
+        self._stop_save_button.setEnabled(False)
+        self._stop_save_button.clicked.connect(self._request_stop_recording)
+        self._stop_save_button.setStyleSheet(self._save_button_style("#cf222e"))
+        button_row.addWidget(self._stop_save_button)
+        layout.addLayout(button_row)
+
+        self._save_state_label = QLabel("未开始记录")
+        self._save_state_label.setWordWrap(True)
+        self._save_state_label.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 10px;")
+        layout.addWidget(self._save_state_label)
+        parent_layout.addWidget(panel)
+
+    @staticmethod
+    def _save_button_style(color: str) -> str:
+        return (
+            "QPushButton {"
+            f"color: {color}; background: transparent; border: 1px solid {color};"
+            "border-radius: 4px; padding: 5px 4px; font-size: 11px;"
+            "}"
+            f"QPushButton:hover {{ background: {color}22; }}"
+            "QPushButton:disabled { color: #6e7781; border-color: #30363d; }"
+        )
 
     def _build_status_bar(self):
         sb = QStatusBar()
@@ -151,6 +217,66 @@ class MainWindow(QMainWindow):
             "stopped": "数据源：已停止",
         }
         self._status_right.setText(labels.get(status, f"数据源：{status}"))
+
+    def _choose_save_path(self):
+        suggested = Path.cwd() / f"传感器数据_{datetime.now():%Y%m%d_%H%M%S}.xlsx"
+        file_path, _selected_filter = QFileDialog.getSaveFileName(
+            self,
+            "选择 Excel 保存位置",
+            str(suggested),
+            "Excel 工作簿 (*.xlsx)",
+        )
+        if not file_path:
+            return
+        path = Path(file_path)
+        if path.suffix.lower() != ".xlsx":
+            path = path.with_suffix(".xlsx")
+        self._save_path = str(path)
+        self._save_path_label.setText(path.name)
+        self._save_path_label.setToolTip(str(path))
+        self._start_save_button.setEnabled(True)
+        self._save_state_label.setText("位置已选择，点击“开始保存”")
+
+    def _request_start_recording(self):
+        if not self._save_path:
+            return
+        self._choose_save_button.setEnabled(False)
+        self._start_save_button.setEnabled(False)
+        self._stop_save_button.setEnabled(False)
+        self._save_state_label.setText("正在创建 Excel 文件…")
+        self.recording_start_requested.emit(self._save_path)
+
+    def _request_stop_recording(self):
+        self._stop_save_button.setEnabled(False)
+        self._save_state_label.setText("正在完成保存…")
+        self.recording_stop_requested.emit()
+
+    def set_recording_started(self, file_path: str):
+        self._save_path = file_path
+        self._choose_save_button.setEnabled(False)
+        self._start_save_button.setEnabled(False)
+        self._stop_save_button.setEnabled(True)
+        self._save_state_label.setText("正在记录 | 电压温度 0 行 | 六通道 0 行")
+        self.statusBar().showMessage(f"数据正在保存到 {file_path}", 5000)
+
+    def set_recording_stopped(self, file_path: str):
+        self._choose_save_button.setEnabled(True)
+        self._start_save_button.setEnabled(bool(self._save_path))
+        self._stop_save_button.setEnabled(False)
+        self._save_state_label.setText("保存已停止，文件已安全写入")
+        self.statusBar().showMessage(f"Excel 已保存：{file_path}", 5000)
+
+    def update_recording_progress(self, voltage_rows: int, process_rows: int):
+        self._save_state_label.setText(
+            f"正在记录 | 电压温度 {voltage_rows} 行 | 六通道 {process_rows} 行"
+        )
+
+    def show_recording_error(self, message: str):
+        self._choose_save_button.setEnabled(True)
+        self._start_save_button.setEnabled(bool(self._save_path))
+        self._stop_save_button.setEnabled(False)
+        self._save_state_label.setText("保存失败，请重新选择文件")
+        QMessageBox.critical(self, "Excel 保存失败", message)
 
     def update_field_frame(self, frame: dict):
         """兼容旧的场数据帧，并从中抽取总览页和数字孪生页需要的 6 个点。"""

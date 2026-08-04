@@ -12,13 +12,19 @@ TCP/UDP 网络数据源。
   {"type": "twin", "timestamp": "...", "sensors": {...}, "warnings": [...], "recommendations": [...]}
   {"type": "field", "timestamp": "...", "fields": {...}}
 
+也支持 udp(3) 使用的三端口报文：
+  - 9090: 1536 字节，ADC0/ADC1/ADC2 各 16 通道交替排列
+  - 9091: PT100 CSV 文本，读取 TEMP 后的 16 路温度
+  - 9092: AI CSV 文本，读取 VALUE 后的 16 路电压
+
 也支持批量帧：
   {"voltage": {...}, "process": {...}, "twin": {...}, "field": {...}}
 """
 from __future__ import annotations
 
+import csv
+import io
 import json
-import re
 import socket
 import struct
 import time
@@ -27,51 +33,53 @@ from typing import Any
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
+AD7616_COUNT = 3
 AD7616_CHANNELS = 16
 AD7616_PROCESS_CHANNEL_COUNT = 6
 AD7616_BYTES_PER_SAMPLE = 2
-AD7616_FRAME_BYTES = AD7616_CHANNELS * AD7616_BYTES_PER_SAMPLE
+AD7616_BLOCK_BYTES = AD7616_CHANNELS * AD7616_BYTES_PER_SAMPLE
+AD7616_BLOCKS_PER_PACKET = 48
+AD7616_PACKET_BYTES = AD7616_BLOCK_BYTES * AD7616_BLOCKS_PER_PACKET
+AD7616_SAMPLES_PER_PACKET = AD7616_BLOCKS_PER_PACKET // AD7616_COUNT
 AD7616_EMIT_INTERVAL_SEC = 0.05
 AD7616_MAX_PENDING_SAMPLES = 2048
 AD7616_MAX_EMIT_SAMPLES = 512
 AD7616_SOCKET_RCVBUF = 4 * 1024 * 1024
 AD7616_PROCESS_CHANNELS = [
-    (0, "pressure_1", "P-01"),
-    (1, "pressure_2", "P-02"),
+    (0, "oxygen", "O2-01"),
+    (1, "hydrogen", "H2-01"),
     (2, "temperature_1", "T-01"),
     (3, "temperature_2", "T-02"),
-    (4, "oxygen", "O2-01"),
-    (5, "hydrogen", "H2-01"),
+    (4, "pressure_1", "P-01"),
+    (5, "pressure_2", "P-02"),
 ]
-_TEMP_VALUE_PATTERN = r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)"
-_TEMP_VALUE_RE = re.compile(_TEMP_VALUE_PATTERN)
+ADC_REFERENCE_VOLTAGE = 5.0
+ADC_CURRENT_RESISTANCE_OHM = 100.0
+ADC_CURRENT_RANGE_A = (-0.05, 0.05)
 
 
-def raw_count_to_current_ma(channel_index: int, raw_count: float) -> float:
-    """Current placeholder conversion: AD7616 count -> simulated 4-20 mA."""
+def raw_count_to_current_a(channel_index: int, raw_count: float) -> float:
+    """按 raw / 32768 * 5 / 100 将 AD7616 原始值换算为电流（A）。"""
     del channel_index
-    normalized = (float(raw_count) + 32768.0) / 65535.0
-    normalized = max(0.0, min(1.0, normalized))
-    return 4.0 + normalized * 16.0
+    actual_voltage = float(raw_count) / 32768.0 * ADC_REFERENCE_VOLTAGE
+    return actual_voltage / ADC_CURRENT_RESISTANCE_OHM
 
 
 def convert_process_channel_value(channel_index: int, raw_count: float) -> dict[str, Any]:
-    """
-    Convert AD7616 raw counts to the process-overview value.
-
-    Current implementation exposes a simulated 4-20 mA signal. Replace this
-    function later with calibrated physical-unit conversion per sensor/channel.
-    """
-    current_ma = raw_count_to_current_ma(channel_index, raw_count)
-    status = "alarm" if current_ma < 4.0 or current_ma > 20.0 else "normal"
+    """生成工况页需要的单通道电流数据。"""
+    actual_voltage = float(raw_count) / 32768.0 * ADC_REFERENCE_VOLTAGE
+    current_a = raw_count_to_current_a(channel_index, raw_count)
+    lo, hi = ADC_CURRENT_RANGE_A
+    status = "alarm" if current_a < lo or current_a > hi else "normal"
     return {
-        "value": round(current_ma, 2),
-        "unit": "mA",
-        "decimals": 2,
-        "normal": (4.0, 20.0),
+        "value": round(current_a, 6),
+        "unit": "A",
+        "decimals": 6,
+        "normal": ADC_CURRENT_RANGE_A,
         "status": status,
-        "raw_count": round(float(raw_count), 2),
-        "channel": channel_index,
+        "raw_count": int(raw_count),
+        "actual_voltage": round(actual_voltage, 6),
+        "channel": channel_index + 1,
     }
 
 
@@ -209,7 +217,9 @@ class NetworkSensorSource(QThread):
     @staticmethod
     def _looks_like_text_packet(packet: bytes) -> bool:
         stripped = packet.lstrip()
-        return stripped.startswith((b"{", b"[", b"PT100", b"pt100", b"TEMP", b"temp"))
+        return stripped.startswith(
+            (b"{", b"[", b"PT100", b"pt100", b"TEMP", b"temp", b"AI", b"ai")
+        )
 
     def _handle_text_packet(self, packet: bytes) -> None:
         text: str | None = None
@@ -233,21 +243,22 @@ class NetworkSensorSource(QThread):
         try:
             data = json.loads(text)
         except json.JSONDecodeError as exc:
-            if self._dispatch_ascii_temperature(text):
+            if self._dispatch_csv_measurements(text):
                 return
             self.error_ready.emit(f"网络帧解析失败：{exc}")
             return
         self._dispatch(data)
 
-    def _dispatch_ascii_temperature(self, text: str) -> bool:
+    def _dispatch_csv_measurements(self, text: str) -> bool:
         channel_temperatures = self._parse_pt100_temperatures(text)
-        if not channel_temperatures:
+        channels = self._parse_ai_values(text)
+        if not channel_temperatures and not channels:
             return False
 
         self.voltage_data_ready.emit(
             {
                 "timestamp": datetime.now(),
-                "channels": {},
+                "channels": channels,
                 "channel_temperatures": channel_temperatures,
             }
         )
@@ -296,15 +307,16 @@ class NetworkSensorSource(QThread):
 
     @staticmethod
     def _parse_ad7616_raw_channels(packet: bytes) -> list[list[int]]:
-        if len(packet) < AD7616_FRAME_BYTES or len(packet) % AD7616_FRAME_BYTES != 0:
+        if len(packet) != AD7616_PACKET_BYTES:
             return []
 
-        frame_count = len(packet) // AD7616_FRAME_BYTES
         raw_by_channel: list[list[int]] = [[] for _ in range(AD7616_PROCESS_CHANNEL_COUNT)]
         try:
-            for frame_index in range(frame_count):
-                offset = frame_index * AD7616_FRAME_BYTES
-                frame_first_six = struct.unpack_from("<6h", packet, offset)
+            for sample_index in range(AD7616_SAMPLES_PER_PACKET):
+                # udp(3) 的块顺序为 ADC0、ADC1、ADC2 循环排列；
+                # 工况页使用每组中第一片 ADC（界面 ADC0）的 CH1~CH6。
+                adc0_offset = sample_index * AD7616_COUNT * AD7616_BLOCK_BYTES
+                frame_first_six = struct.unpack_from("<6h", packet, adc0_offset)
                 for channel_index, raw_value in enumerate(frame_first_six):
                     raw_by_channel[channel_index].append(raw_value)
         except struct.error:
@@ -324,7 +336,7 @@ class NetworkSensorSource(QThread):
             if not raw_values:
                 continue
             values = [
-                round(raw_count_to_current_ma(channel_index, raw_value), 4)
+                round(raw_count_to_current_a(channel_index, raw_value), 6)
                 for raw_value in raw_values
             ]
             payload = convert_process_channel_value(channel_index, raw_values[-1])
@@ -337,25 +349,33 @@ class NetworkSensorSource(QThread):
 
     @staticmethod
     def _parse_pt100_temperatures(text: str) -> dict[str, float]:
-        parts = [part.strip() for part in text.replace("；", ";").split(",")]
-        temp_index = None
-        for index, part in enumerate(parts):
-            if part.upper() == "TEMP":
-                temp_index = index + 1
-                break
-        if temp_index is None:
+        return NetworkSensorSource._parse_csv_channel_values(text, "TEMP")
+
+    @staticmethod
+    def _parse_ai_values(text: str) -> dict[str, float]:
+        return NetworkSensorSource._parse_csv_channel_values(text, "VALUE")
+
+    @staticmethod
+    def _parse_csv_channel_values(text: str, marker: str) -> dict[str, float]:
+        try:
+            row = next(csv.reader(io.StringIO(text)))
+        except (csv.Error, StopIteration):
             return {}
 
-        values: list[float] = []
-        for part in parts[temp_index:]:
-            match = _TEMP_VALUE_RE.search(part)
-            if match is None:
-                continue
-            values.append(round(float(match.group(0)), 1))
-            if len(values) == 16:
-                break
+        marker_index = next(
+            (index for index, part in enumerate(row) if part.strip().upper() == marker),
+            None,
+        )
+        if marker_index is None:
+            return {}
 
-        if len(values) != 16:
+        raw_values = row[marker_index + 1:marker_index + 17]
+        if len(raw_values) != 16:
+            return {}
+
+        try:
+            values = [float(value.strip()) for value in raw_values]
+        except ValueError:
             return {}
         return {f"CH{index:02d}": value for index, value in enumerate(values, start=1)}
 

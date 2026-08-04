@@ -1,7 +1,7 @@
 """
 应用入口。
 
-默认启动 UDP 工况监听和槽电压 PT100 温度监听：
+默认启动 UDP 工况、槽电压 PT100 温度和模拟量监听：
   python main.py
 
 接入 Linux 采集板：
@@ -18,12 +18,14 @@ import sys
 from PyQt6.QtWidgets import QApplication
 
 from backend.data_manager import DataManager
+from backend.excel_recorder import ExcelDataRecorder
 from backend.network_receiver import NetworkSensorSource
 from frontend.main_window import MainWindow
 from frontend.styles import DARK_STYLE
 
 DEFAULT_PROCESS_PORT = 9090
 DEFAULT_TEMPERATURE_PORT = 9091
+DEFAULT_VOLTAGE_PORT = 9092
 
 
 def _parse_args() -> argparse.Namespace:
@@ -36,6 +38,12 @@ def _parse_args() -> argparse.Namespace:
         type=int,
         default=DEFAULT_TEMPERATURE_PORT,
         help="槽电压 PT100 UDP 温度监听端口",
+    )
+    parser.add_argument(
+        "--voltage-port",
+        type=int,
+        default=DEFAULT_VOLTAGE_PORT,
+        help="槽电压模拟量 AI UDP 监听端口",
     )
     return parser.parse_args()
 
@@ -50,12 +58,22 @@ def main() -> int:
 
     window = MainWindow()
     data_manager = DataManager()
+    excel_recorder = ExcelDataRecorder()
 
     data_manager.field_data_updated.connect(window.update_field_frame)
     data_manager.voltage_data_updated.connect(window.update_voltage_frame)
     data_manager.process_data_updated.connect(window.update_process)
     data_manager.twin_data_updated.connect(window.update_twin)
     data_manager.source_status_changed.connect(window.update_source_status)
+    data_manager.voltage_data_updated.connect(excel_recorder.record_voltage_frame)
+    data_manager.process_data_updated.connect(excel_recorder.record_process_frame)
+
+    window.recording_start_requested.connect(excel_recorder.start)
+    window.recording_stop_requested.connect(excel_recorder.stop)
+    excel_recorder.recording_started.connect(window.set_recording_started)
+    excel_recorder.recording_stopped.connect(window.set_recording_stopped)
+    excel_recorder.progress_ready.connect(window.update_recording_progress)
+    excel_recorder.error_ready.connect(window.show_recording_error)
 
     network_sources: list[NetworkSensorSource] = []
     if args.source == "mock":
@@ -78,6 +96,21 @@ def main() -> int:
             )
             network_sources.append(temperature_source)
 
+        if (
+            args.source == "udp"
+            and args.voltage_port not in (args.port, args.temperature_port)
+        ):
+            voltage_source = NetworkSensorSource(
+                protocol="udp",
+                host=args.host,
+                port=args.voltage_port,
+            )
+            voltage_source.voltage_data_ready.connect(data_manager._on_voltage_data)
+            voltage_source.error_ready.connect(
+                lambda msg: window.statusBar().showMessage(msg, 5000)
+            )
+            network_sources.append(voltage_source)
+
         for source in network_sources:
             source.start()
 
@@ -85,6 +118,7 @@ def main() -> int:
         for source in network_sources:
             source.stop()
         data_manager.stop()
+        excel_recorder.stop()
 
     app.aboutToQuit.connect(_shutdown)
     window.show()
