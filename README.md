@@ -1,4 +1,14 @@
 
+# 交付文档入口
+
+请优先阅读本次按实际交付源码编制的两份文档：
+
+- [用户操作指南](docs/02_用户操作指南.md)
+- [代码说明](docs/01_代码说明.md)
+- [交付核查记录](docs/交付核查记录.md) · [源码校验清单](docs/源码校验清单.csv)
+
+当前默认入口为 `python main.py`，默认接收 UDP 9090、9091、9092；演示使用 `python main.py --source mock`。下方为原项目介绍，部分功能、单位和启动方式对应旧实现，实际操作以交付文档为准。
+
 # Multi-Sensor Monitoring Platform in Industrial Hydrogen Production Scenarios
 传感器：氢气一个、氧气一个、压力两个、温度两个
 **工业制氢场景下的多传感器监控平台**

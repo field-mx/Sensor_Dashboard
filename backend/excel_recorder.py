@@ -1,6 +1,7 @@
 """后台 Excel 数据记录器。"""
 from __future__ import annotations
 
+import math
 import os
 import queue
 import threading
@@ -18,12 +19,12 @@ from PyQt6.QtCore import QObject, pyqtSignal, pyqtSlot
 AUTOSAVE_INTERVAL_SEC = 1.0
 VOLTAGE_CHANNELS = [f"CH{index:02d}" for index in range(1, 17)]
 PROCESS_COLUMNS = [
-    ("oxygen", "氧气浓度", "A"),
-    ("hydrogen", "氢气浓度", "A"),
-    ("temperature_1", "温度1", "A"),
-    ("temperature_2", "温度2", "A"),
-    ("pressure_1", "压力1", "A"),
-    ("pressure_2", "压力2", "A"),
+    ("oxygen", "氧气浓度", "vol"),
+    ("hydrogen", "氢气浓度", "ppm"),
+    ("temperature_1", "温度1", "mA"),
+    ("temperature_2", "温度2", "mA"),
+    ("pressure_1", "压力1", "mA"),
+    ("pressure_2", "压力2", "mA"),
 ]
 _STOP = object()
 
@@ -92,10 +93,15 @@ class ExcelDataRecorder(QObject):
         )
         if not channels and not temperatures:
             return
+        temperature_values = (
+            [self._temperature_numeric(temperatures.get(ch)) for ch in VOLTAGE_CHANNELS]
+            if temperatures
+            else [None] * len(VOLTAGE_CHANNELS)
+        )
         row = [
             timestamp,
             *[self._numeric(channels.get(ch)) for ch in VOLTAGE_CHANNELS],
-            *[self._numeric(temperatures.get(ch)) for ch in VOLTAGE_CHANNELS],
+            *temperature_values,
         ]
         self._enqueue(("voltage_temperature", [row]))
 
@@ -191,8 +197,20 @@ class ExcelDataRecorder(QObject):
         meta.append(["最近保存时间", datetime.now()])
         meta.append(["电压温度记录行数", 0])
         meta.append(["六通道记录行数", 0])
-        meta.append(["说明", "两组数据按各自接收频率独立记录，不进行重采样或时间插值。"])
-        meta.append(["ADC换算", "六通道数据均为换算电流：A = 原始值 / 32768 × 5 / 100"])
+        meta.append(
+            ["说明", "电压温度按接收频率记录；六通道每秒取最新采样并记录一次。"]
+        )
+        meta.append(
+            ["ADC换算", "六通道数据均为换算电流：mA = 原始值 / 32768 × 5 / 100 × 1000"]
+        )
+        meta.append(
+            [
+                "气体浓度换算",
+                "氢气电流≤4mA：O2=(O2电流-H2电流)×1.5625 vol，H2=0 ppm；"
+                "氢气电流>4mA：O2=(O2电流-3.8)×1.5625 vol，"
+                "H2=(H2电流-4)×62.5 ppm。",
+            ]
+        )
 
         voltage_sheet = workbook.create_sheet("电压温度")
         voltage_sheet.append(
@@ -275,9 +293,15 @@ class ExcelDataRecorder(QObject):
         if value is None:
             return None
         try:
-            return float(value)
+            numeric = float(value)
         except (TypeError, ValueError):
             return None
+        return numeric if math.isfinite(numeric) else None
+
+    @staticmethod
+    def _temperature_numeric(value: Any) -> float | int:
+        numeric = ExcelDataRecorder._numeric(value)
+        return numeric if numeric is not None else 0
 
     @staticmethod
     def _sensor_series(payload: Any) -> list[float | int | None]:

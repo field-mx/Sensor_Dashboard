@@ -272,7 +272,7 @@ class _ChannelCard(QFrame):
             self._pw.setYRange(VOLTAGE_MIN, VOLTAGE_MAX, padding=0.03)
             self._curve.setPen(pg.mkPen(color=self._color, width=1.7))
 
-    def push_value(self, voltage: float | None = None, temperature: float | None = None):
+    def push_value(self, voltage: Any = None, temperature: Any = None):
         now = time.monotonic() - self._t0
         if not self._t_buf or now != self._t_buf[-1]:
             self._t_buf.append(now)
@@ -296,12 +296,21 @@ class _ChannelCard(QFrame):
             self._voltage_lbl.setStyleSheet(self._metric_style(v_color, 20))
 
         if temperature is not None:
-            t = max(TEMP_MIN, min(TEMP_MAX, float(temperature)))
-            self._last_temperature = t
-            self._temperature_buf.append(t)
-            t_color = _status_color(t, warn=75.0, alarm=85.0)
-            self._temperature_lbl.setText(f"{t:5.1f} °C")
-            self._temperature_lbl.setStyleSheet(self._metric_style(t_color, 17))
+            try:
+                parsed_temperature = float(temperature)
+                if not np.isfinite(parsed_temperature):
+                    raise ValueError
+            except (TypeError, ValueError):
+                self._last_temperature = None
+                self._temperature_lbl.setText("null")
+                self._temperature_lbl.setStyleSheet(self._metric_style(ACCENT_RED, 17))
+            else:
+                t = max(TEMP_MIN, min(TEMP_MAX, parsed_temperature))
+                self._last_temperature = t
+                self._temperature_buf.append(t)
+                t_color = _status_color(t, warn=75.0, alarm=85.0)
+                self._temperature_lbl.setText(f"{t:5.1f} °C")
+                self._temperature_lbl.setStyleSheet(self._metric_style(t_color, 17))
 
         if self._expanded:
             self._refresh_curve()
