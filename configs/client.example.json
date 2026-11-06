@@ -1,0 +1,4 @@
+{
+  "api_url": "http://127.0.0.1:18000",
+  "data_path": "sample_data/SensorData.xlsx"
+}

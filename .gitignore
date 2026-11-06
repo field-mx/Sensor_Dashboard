@@ -1,0 +1,21 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+runtime/
+exports/
+vendor/
+*.log
+configs/local.json
+sample_data/
+recovery_conflicts/
+*SFConflict*
+wheelhouse/
+dist/
+
+# Public source excludes private delivery records and local assets.
+TASKS.md
+docs/planning/
+evidence/*
+!evidence/README.md
+docs/images/monitoring.png

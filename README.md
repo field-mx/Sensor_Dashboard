@@ -1,199 +1,80 @@
+# 电解槽AI监控系统
 
-# Multi-Sensor Monitoring Platform in Industrial Hydrogen Production Scenarios
-**工业制氢场景下的多传感器监控平台**
+**简体中文** · [English](README.en.md) · [预测模型：PhysicsRelationCTF](https://github.com/field-mx/PhysicsRelationCTF)
 
-# 电解制备氢气监控系统
+基于 **PyQt6 + FastAPI + PRCTF** 的 Windows 桌面软件，用 Excel 历史数据回放呈现电解槽监测、真实预测、残差预警及模型更新。推理、训练和每日任务均在本机 CPU 上运行，无需学校服务器。
 
-> **Electrolysis H₂ Production Monitoring Dashboard**  
-> 基于 PyQt6 + pyqtgraph 的工业级实时监控界面，适用于质子交换膜（PEM）或碱性水电解制氢设备的现场数据可视化。
+![模型版本管理界面](docs/images/model-versions.png)
 
----
+*软件模型管理界面的实际截图，仅显示公开基线和操作入口，不包含工业实测数据及私有候选评估结果。*
 
-## 功能概览
+## 功能
 
 | 模块 | 功能 |
 |---|---|
-| **三维场数据视图** | 温度场、氢气浓度场、氧气浓度场、压力场的实时 3D 散点云图，支持拖拽旋转、悬停预览、点击固定历史折线图卡 |
-| **槽电压监控** | 16 通道实时电压数值显示（0–30 V，精度 0.001 V），支持单通道展开查看近 1 分钟历史波形 |
-| **历史趋势弹窗** | 点击三维传感器点弹出非模态历史趋势图，含 5 分钟数据、统计摘要（最小/最大/均值/标准差） |
-| **后端数据调度** | `DataManager` 集中管理数据源，支持模拟数据与真实硬件无缝切换，缓存最近 5 分钟历史数据 |
+| Excel 回放 | 参考工作簿含61测点、1秒采样；支持播放、暂停、重置和倍速。 |
+| 真实预测 | 输入过去96秒，输出未来连续96秒；56通道参与预测，其余参考测点仅观测。 |
+| 残差预警 | 回放副本可注入突高/突低；连续3点残差超限触发、5点有效正常恢复；支持事件查看与CSV导出。 |
+| 三维示意 | 展示电解槽结构及测点状态，未确认安装位置不虚构定位。 |
+| 本机后训练 | 拖入正常Excel，校验通道和时间分区，独立进程执行真实微调，显示进度及loss。 |
+| 版本管理 | 候选先验证，通过后手动激活，支持回滚至公开基线。 |
+| 每日更新 | 默认关闭，Asia/Shanghai时区；仅处理合格且未处理过的新数据，重复回放不算新增；不会自动激活候选。 |
 
----
+## 模型算法
 
-## 项目结构
+算法与公开权重位于 **[field-mx/PhysicsRelationCTF](https://github.com/field-mx/PhysicsRelationCTF)**。
 
-```
-Sensor_Dashboard/
-├── main.py                  # 应用入口，初始化 Qt 应用、主窗口、模拟数据推送
-│
-├── backend/
-│   ├── mock_generator.py    # 模拟数据生成线程（QThread）
-│   └── data_manager.py      # 核心数据调度类（QObject），含历史缓存与查询接口
-│
-├── frontend/
-│   ├── main_window.py       # 主窗口：左侧菜单 + 右侧页面堆栈
-│   ├── view_3d.py           # 三维场数据散点云图页面（含悬停卡、固定历史图卡、色条）
-│   ├── view_voltage.py      # 槽电压监控页面（16 通道折叠卡片 + 波形图）
-│   ├── history_dialog.py    # 历史趋势弹窗（非模态 QDialog）
-│   └── styles.py            # 全局深色工业风主题、颜色常量、渐变工具函数
-│
-└── requirements.txt
-```
+- 固定提交：[`9b9b19401d0e87fe8b0c21c27abe3368ecc73122`](https://github.com/field-mx/PhysicsRelationCTF/tree/9b9b19401d0e87fe8b0c21c27abe3368ecc73122)。
+- 工业权重：[`weights/industrial/prctf_seed42.pt`](https://github.com/field-mx/PhysicsRelationCTF/blob/9b9b19401d0e87fe8b0c21c27abe3368ecc73122/weights/industrial/prctf_seed42.pt)。
+- 输入输出：`[B,96,56] → [B,96,56]`，使用1秒采样的原始单位；标准化及反标准化由公开预测器完成。
+- ChannelTokenFormer 固定版本：`b1c100effb9c27cd25de07e91de7f9005d18d5e7`，使用模型仓库的上游获取脚本下载。
 
----
+黄色曲线显示最新一轮完整96步预测。绿色曲线固定记录每个观测时刻到达前的最新预测；连续每秒更新时，它对应提前1秒预测。预警比较这种因果残差，不读取人工注入标记。
 
-## 环境要求
+## Windows 启动
 
-| 依赖 | 版本 |
-|---|---|
-| Python | ≥ 3.10 |
-| PyQt6 | ≥ 6.4 |
-| pyqtgraph | ≥ 0.13 |
-| numpy | ≥ 1.24 |
-| PyOpenGL | ≥ 3.1 |
+需要 **64位 Python 3.11**。已拿到完整离线交付文件夹时，首次运行 `Setup.cmd`，之后双击 `StartDemo.cmd`；结束后台使用 `StopBackend.cmd`。
 
----
+公开仓库包含源码和界面图，原始工业Excel、运行记录、模型下载目录、Python环境和离线依赖包不上传。从源码运行，请安装 Git 后在 PowerShell 执行：
 
-## 快速开始
-
-```bash
-# 1. 克隆仓库
-git clone <repo-url>
+```powershell
+git clone https://github.com/field-mx/Sensor_Dashboard.git
 cd Sensor_Dashboard
 
-# 2. 创建虚拟环境（推荐 conda）
-conda create -n sensorDashboard python=3.11
-conda activate sensorDashboard
+# 获取固定模型及其指定的上游源码。
+git clone https://github.com/field-mx/PhysicsRelationCTF.git vendor/PhysicsRelationCTF
+git -C vendor/PhysicsRelationCTF checkout --detach 9b9b19401d0e87fe8b0c21c27abe3368ecc73122
+py -3.11 vendor/PhysicsRelationCTF/scripts/fetch_upstreams.py --ctf
 
-# 3. 安装依赖
-pip install -r requirements.txt
-
-# 4. 运行
-python main.py
+py -3.11 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install torch==2.11.0+cpu --index-url https://download.pytorch.org/whl/cpu
+.\.venv\Scripts\python.exe -m pip install -r requirements-lock.txt
+.\StartDemo.cmd
 ```
 
----
+打开软件后，选择或拖入有权使用的Excel，点击“导入数据”及“播放”。源码仓库不附私有工作簿；`Setup.cmd`检查完整交付资源，从源码启动请使用上面的安装命令。
 
-## 数据格式说明
+Excel 可采用原始 SensorData 三行表头，或第一列为 `source_time`、`time`、`时间`、其后为测点ID的单行表头。须包含 [model-schema.json](configs/model-schema.json) 中全部模型通道、有限数值及严格连续的1秒时间。
 
-### 场数据（`field_data_ready` 信号）
+## 使用流程
 
-```python
-{
-    "timestamp": datetime,
-    "fields": {
-        "temperature":      [{"x": int, "y": int, "z": int, "sensor_id": str, "value": float}, ...],
-        "h2_concentration": [...],  # 体积分数，中心值约 0.03
-        "o2_concentration": [...],  # 体积分数，中心值约 0.20
-        "pressure":         [...],  # kPa，中心值约 101.3
-    }
-}
-```
+**导入Excel → 播放 → 96点预热后预测 → 注入突高/突低并查看预警 → 导入正常数据后训练 → 验证候选 → 激活或回滚。**
 
-- **传感器 ID 格式**：`S_XXYYZZ`，例如坐标 (1, 2, 0) → `S_010200`
-- **网格尺寸**：默认 4×4×3 = 48 个传感器点（可在 `mock_generator.py` 中调整 `GRID_X/Y/Z`）
+每日训练可在模型更新窗口开启并保存时间。关闭前端后，后台需保持运行。默认API为 `http://127.0.0.1:18000`，仅本机访问；配置、任务和新权重保存在 `%LOCALAPPDATA%\SensorDashboardDemo\runtime`。
 
-### 槽电压数据（`voltage_data_ready` 信号）
+## 代码与文档
 
-```python
-{
-    "timestamp": datetime,
-    "channels": {
-        "CH01": float,   # 0.0 – 30.0 V，精确到 0.001 V
-        "CH02": float,
-        ...
-        "CH16": float,
-    }
-}
-```
+| 目录 | 用途 |
+|---|---|
+| `sensor_demo/` | 桌面界面、回放、异步预测、预警和模型更新窗口 |
+| `demo_server/` | 推理、训练进程、候选验证、版本切换和调度 |
+| `demo_tools/` | 环境安装、完整性检查及离线打包 |
+| `configs/` | 模型通道、基线预警校准和冻结评估配方 |
+| `docs/images/` | 中英README共用的实际截图 |
+| `tests/` | 开发检查；模型与数据集成检查需准备授权的本地资源 |
 
----
+[操作指南](docs/操作指南.md) · [代码说明](docs/代码说明.md) · [离线Windows部署](docs/Windows本机部署.md) · [演示步骤](docs/演示步骤.md)
 
-## 后端接口
+完整本地交付已通过45项开发检查和实际桌面验收。历史数据可能用于基线训练，残差预警不等同于确认设备故障，后训练不保证效果提升。
 
-### DataManager 关键方法
-
-```python
-from backend.data_manager import DataManager
-
-dm = DataManager()
-dm.start_mock_source()          # 启动模拟数据源
-dm.field_data_updated.connect(your_slot)    # 订阅实时场数据
-dm.voltage_data_updated.connect(your_slot)  # 订阅实时电压数据
-
-# 查询历史（按 sensor_id）
-result = dm.query_field_history(
-    sensor_id="S_010200",
-    field_name="temperature",   # temperature | h2_concentration | o2_concentration | pressure
-    duration_sec=300            # 最近 N 秒，默认 300（5 分钟）
-)
-# result: {"timestamps": [...], "values": [...], "sensor_id": "S_010200", "field_name": "temperature"}
-
-# 查询历史（按坐标）
-result = dm.query_field_history(x=1, y=2, z=0, field_name="pressure")
-
-# 查询电压历史
-result = dm.query_voltage_history(channel="CH01", duration_sec=60)
-
-# 接入真实硬件（替换数据源，无需修改其他代码）
-dm.set_hardware_source(your_hardware_object)  # 需具备 field_data_ready 和 voltage_data_ready 信号
-```
-
-### 接入真实硬件
-
-`DataManager.set_hardware_source()` 接受任意具备以下两个 `pyqtSignal` 的 `QObject`：
-
-- `field_data_ready(dict)` —— 格式同上方场数据结构
-- `voltage_data_ready(dict)` —— 格式同上方电压数据结构
-
-切换数据源时无需修改调度逻辑和 UI 代码：
-
-```python
-dm.stop()                          # 停止模拟源
-dm.set_hardware_source(hw_driver)  # 无缝切换
-```
-
----
-
-## 界面交互说明
-
-### 三维视图
-- **拖拽**：旋转三维场景
-- **鼠标悬停**靠近传感器点（屏幕距离 < 12 px）：弹出轻量浮动信息卡（传感器 ID、当前值、坐标）
-- **左键单击**传感器点：固定一张历史折线图卡，跟随旋转移动；再次单击同一点取消
-- **右侧色条**：实时显示场值范围（上=最大值，下=最小值）
-
-### 槽电压页面
-- **折叠态**：紧凑显示通道名 + 实时数值，颜色随电压报警阈值变化（> 25 V 变红）
-- **展开态**：显示近 60 秒滚动波形图
-- **全部展开/折叠**按钮：一键操作所有通道
-
----
-
-## 配置参数
-
-主要可配置常量集中在以下文件：
-
-| 文件 | 常量 | 说明 |
-|---|---|---|
-| `mock_generator.py` | `EMIT_INTERVAL_MS` | 数据发射间隔（ms），默认 1000 |
-| `mock_generator.py` | `NUM_CHANNELS` | 槽电压通道数，默认 16 |
-| `mock_generator.py` | `GRID_X/Y/Z` | 三维传感器网格尺寸，默认 4×4×3 |
-| `mock_generator.py` | `FIELD_CONFIGS` | 各场物理量中心值与波动幅度 |
-| `data_manager.py` | `HISTORY_DURATION_SEC` | 历史缓存时长（秒），默认 300 |
-| `view_voltage.py` | `NUM_CHANNELS` | 界面显示通道数，默认 16 |
-
----
-
-## 开发说明
-
-- **纯信号/槽通信**：后端与前端之间完全通过 `pyqtSignal` 解耦，后端不含任何 UI 代码
-- **线程安全**：`DataManager` 的历史缓存读写均受 `threading.Lock` 保护
-- **历史容量**：使用 `collections.deque(maxlen=N)` 自动淘汰旧帧，不会内存溢出
-- **GL 覆盖问题**：悬浮信息卡挂载于普通 `QWidget` 层而非 OpenGL 控件，避免被 GL 渲染覆盖
-
----
-
-## License
-
-本项目为上海电气联合研究项目内部原型，未经许可不得对外分发。
+此前的main保留在 [`backup/main-before-ai-monitor-20261106`](https://github.com/field-mx/Sensor_Dashboard/tree/backup/main-before-ai-monitor-20261106)。模型与上游说明见[算法仓库](https://github.com/field-mx/PhysicsRelationCTF/blob/9b9b19401d0e87fe8b0c21c27abe3368ecc73122/THIRD_PARTY_NOTICES.md)，Logo来源见 [SOURCES.md](sensor_demo/assets/SOURCES.md)。

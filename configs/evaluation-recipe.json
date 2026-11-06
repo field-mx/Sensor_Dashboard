@@ -1,0 +1,22 @@
+{
+  "recipe_id": "prctf_demo_validation_v1",
+  "reference": "public-industrial-baseline",
+  "evaluation_windows": 32,
+  "overall_max_ratio": 1.02,
+  "critical_max_ratio": 1.10,
+  "critical_absolute_normalized_mae": {
+    "SCRDLFK": 0.002,
+    "SCRDYFK": 0.002,
+    "avg": 0.002,
+    "max": 0.002,
+    "TT010301": 0.002,
+    "PT010303": 0.002,
+    "PT010304": 0.002,
+    "AT010301": 0.002,
+    "AT010302": 0.002
+  },
+  "calibration_windows": 128,
+  "calibration_quantile": 0.99,
+  "calibration_floor_raw_scale_ratio": 0.05,
+  "fault": {"channel": "TT010301", "amplitudes": [20.0, -20.0], "duration": 12, "steps": 160, "alarm_points": 3, "recovery_points": 5}
+}
